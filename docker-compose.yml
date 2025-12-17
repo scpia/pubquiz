@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # The Game Server
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+    depends_on:
+      - redis
+
+  # The React Frontend
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  # State Store
+  redis:
+    image: redis:alpine
+    restart: always
