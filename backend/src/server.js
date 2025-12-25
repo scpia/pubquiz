@@ -30,6 +30,7 @@ io.on('connection', (socket) => {
     socket.on('join_team', (data) => gameManager.handleJoinTeam(socket, data));
     socket.on('host_action', (data) => gameManager.handleHostAction(socket, data));
     socket.on('submit_answer', (data) => gameManager.handleSubmit(socket, data));
+    socket.on('list_lobbies', () => gameManager.handleListOpenLobbies(socket));
 });
 
 const PORT = process.env.PORT || 3000;

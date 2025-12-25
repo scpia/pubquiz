@@ -11,6 +11,24 @@ class GameManager {
         this.timeouts = {}; // roomCode -> setTimeout ID
     }
 
+    // --- Lobby Discovery ---
+    handleListOpenLobbies(socket) {
+        const lobbies = Object.values(this.rooms)
+            .filter(room => ['LOBBY', 'LOBBY_READY', 'LOADING'].includes(room.status))
+            .map(room => {
+                const host = Object.values(room.players).find(p => p.isHost);
+                return {
+                    code: room.code,
+                    status: room.status,
+                    playerCount: Object.keys(room.players).length,
+                    teamCount: Object.keys(room.teams).length,
+                    hostName: host ? host.name : 'Unknown'
+                };
+            });
+
+        socket.emit('open_lobbies', lobbies);
+    }
+
     // --- Actions ---
 
     handleCreateRoom(socket, { hostName }) {
@@ -69,7 +87,8 @@ class GameManager {
             score: 0,
             members: [socket.id],
             currentAnswerId: null,
-            lastAnswerTime: 0
+            lastAnswerTime: 0,
+            lastAnsweredBy: null
         };
         
         room.players[socket.id].teamId = teamId;
@@ -160,6 +179,7 @@ class GameManager {
         Object.values(room.teams).forEach(t => {
             t.currentAnswerId = null;
             t.lastAnswerTime = 0;
+            t.lastAnsweredBy = null;
         });
 
         this.broadcastState(roomCode);
@@ -206,6 +226,7 @@ class GameManager {
 
         // Team Hive Mind Logic
         team.currentAnswerId = answerId;
+        team.lastAnsweredBy = socket.id;
         
         // Record time relative to start (for speed bonus)
         const startTime = room.currentQuestionEndsAt - 60000;

@@ -11,6 +11,7 @@ export default function App() {
   const [name, setName] = useState('');
   const [gameState, setGameState] = useState(null);
   const [timeLeft, setTimeLeft] = useState(60);
+  const [openLobbies, setOpenLobbies] = useState([]);
 
   // Settings State
   const [difficulty, setDifficulty] = useState('medium');
@@ -44,6 +45,7 @@ export default function App() {
       }
     });
 
+    socket.on('open_lobbies', (lobbies) => setOpenLobbies(lobbies));
     socket.on('error', (err) => alert(err.message));
     socket.on('kicked', () => { alert("You have been kicked."); window.location.reload(); });
 
@@ -65,15 +67,29 @@ export default function App() {
 
   // --- ACTIONS ---
   const createRoom = () => { if(!name.trim()) return alert("Nickname required"); socket.emit('create_room', { hostName: name }); };
-  const joinRoom = () => { if(!name.trim() || !roomCode.trim()) return alert("Info required"); socket.emit('join_game', { roomCode: roomCode.toUpperCase(), name }); };
+  const joinRoom = (code = roomCode) => { 
+    const normalized = code?.toString().trim();
+    if(!name.trim() || !normalized) return alert("Info required"); 
+    socket.emit('join_game', { roomCode: normalized.toUpperCase(), name }); 
+  };
   const createTeam = (teamName) => { if(!teamName.trim()) return; socket.emit('create_team', { roomCode: gameState.code, teamName }); };
   const joinTeam = (teamId) => { socket.emit('join_team', { roomCode: gameState.code, teamId }); };
   const submitAnswer = (answerId) => { socket.emit('submit_answer', { roomCode: gameState.code, answerId }); };
   const adminAction = (action, payload = {}) => { socket.emit('host_action', { roomCode: gameState.code, action, payload }); };
+  const refreshLobbies = () => socket.emit('list_lobbies');
+  const goToMenu = () => { if(!name.trim()) return alert("Nickname required"); setView('MENU'); refreshLobbies(); };
 
   const iAmHost = gameState?.players[socket.id]?.isHost;
   const myPlayer = gameState?.players[socket.id];
   const myTeam = myPlayer?.teamId ? gameState?.teams[myPlayer.teamId] : null;
+
+  useEffect(() => {
+    if (view === 'MENU') {
+        refreshLobbies();
+        const interval = setInterval(refreshLobbies, 5000);
+        return () => clearInterval(interval);
+    }
+  }, [view]);
 
   // --- COMPONENTS ---
 
@@ -83,21 +99,67 @@ export default function App() {
         <div className="bg-brand-card p-8 rounded-2xl border border-slate-700 shadow-2xl max-w-md w-full space-y-6">
           <h1 className="text-4xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">PUB QUIZ</h1>
           <input className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white" placeholder="Nickname" value={name} onChange={e => setName(e.target.value)}/>
-          <div className="flex gap-4">
-            <button onClick={createRoom} className="flex-1 bg-indigo-600 font-bold py-3 rounded-xl text-white">Host</button>
-            <button onClick={() => setView('JOIN')} className="flex-1 bg-slate-700 font-bold py-3 rounded-xl text-white">Join</button>
-          </div>
+          <button onClick={goToMenu} className="w-full bg-indigo-600 font-bold py-3 rounded-xl text-white">Continue</button>
         </div>
       </div>
     );
   }
 
-  if (view === 'JOIN') {
+  if (view === 'MENU') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-xs space-y-4 text-center">
-          <input className="w-full bg-slate-900 border-2 border-indigo-500 rounded-xl p-4 text-center text-3xl font-mono uppercase text-white" placeholder="ABCD" maxLength={4} onChange={e => setRoomCode(e.target.value)} />
-          <button onClick={joinRoom} className="w-full bg-green-500 font-bold py-4 rounded-xl text-slate-900">ENTER</button>
+      <div className="min-h-screen bg-slate-950 text-white p-6">
+        <div className="max-w-5xl mx-auto space-y-8">
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider">Welcome</div>
+              <div className="text-3xl font-black">{name || 'Player'}</div>
+            </div>
+            <button onClick={createRoom} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl shadow-lg">Host New Lobby</button>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+              <div>
+                <div className="text-xs uppercase text-slate-500">Join by Code</div>
+                <div className="text-lg font-semibold">Have a room code? Jump in.</div>
+              </div>
+              <div className="flex gap-2">
+                <input className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono uppercase w-28 text-center" maxLength={4} placeholder="ABCD" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
+                <button onClick={() => joinRoom()} className="bg-green-500 text-slate-900 font-bold px-5 py-3 rounded-xl hover:bg-green-400">Join</button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-sm text-slate-500">
+              <div>Live lobbies refresh every few seconds.</div>
+              <button onClick={refreshLobbies} className="text-indigo-400 hover:text-indigo-300">Refresh now</button>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Open Lobbies</h2>
+              <span className="text-sm text-slate-400">{openLobbies.length} active</span>
+            </div>
+            {openLobbies.length === 0 ? (
+              <div className="text-slate-500">No open lobbies right now. Start one and invite friends!</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {openLobbies.map(lobby => (
+                  <div key={lobby.code} className="border border-slate-800 bg-slate-800 p-4 rounded-xl flex flex-col gap-2">
+                    <div className="flex justify-between items-center">
+                      <div className="text-lg font-bold">Room {lobby.code}</div>
+                      <span className="text-xs px-2 py-1 rounded-full bg-slate-700 uppercase tracking-wide">{lobby.status}</span>
+                    </div>
+                    <div className="text-sm text-slate-400">Host: {lobby.hostName}</div>
+                    <div className="flex gap-4 text-sm text-slate-400">
+                      <span>Players: {lobby.playerCount}</span>
+                      <span>Teams: {lobby.teamCount}</span>
+                    </div>
+                    <button onClick={() => joinRoom(lobby.code)} className="mt-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg">Join Lobby</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -198,7 +260,7 @@ export default function App() {
            {/* === END RESULT BANNER === */}
 
            <div className="mb-8 w-full">
-              <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 text-center">{gameState.currentQuestion.category}</div>
+             <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 text-center">{gameState.currentQuestion.category}</div>
               <h2 className="text-2xl md:text-4xl font-bold text-center text-white leading-tight">{gameState.currentQuestion.text}</h2>
            </div>
 
@@ -207,6 +269,7 @@ export default function App() {
                 // Determine Colors based on Game State
                 const isCorrect = gameState.currentQuestion.correctAnswerId === ans.id;
                 const isSelectedByTeam = myTeam?.currentAnswerId === ans.id;
+                const answeringPlayer = myTeam?.lastAnsweredBy ? gameState.players[myTeam.lastAnsweredBy] : null;
                 
                 let btnStyle = "bg-slate-800 border-slate-700 text-slate-300 opacity-60"; 
 
@@ -223,7 +286,7 @@ export default function App() {
                     {ans.text}
                     {isSelectedByTeam && gameState.status === 'QUESTION' && (
                         <div className="absolute -top-2 -right-2 bg-white text-indigo-900 w-8 h-8 flex items-center justify-center rounded-full font-bold border-2 border-indigo-600">
-                             {gameState.players[socket.id]?.name?.charAt(0).toUpperCase()}
+                             {(answeringPlayer?.name || gameState.players[socket.id]?.name || '?').charAt(0).toUpperCase()}
                         </div>
                     )}
                   </button>
