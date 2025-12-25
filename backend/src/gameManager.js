@@ -44,7 +44,8 @@ class GameManager {
             currentQuestionIndex: 0,
             currentQuestionEndsAt: 0, 
             answers: {}, 
-            config: { amount: 10, difficulty: 'medium' }
+            roundNumber: 1,
+            config: { amount: 10, categories: [], difficulties: [], questionDurationSec: 60 }
         };
 
         this.handleJoin(socket, { roomCode, name: hostName });
@@ -128,11 +129,15 @@ class GameManager {
             this.broadcastState(roomCode);
 
             try {
-                const { amount, difficulty, category } = payload;
-                room.config = { amount, difficulty, category };
+                const amount = Number(payload.amount) || 10;
+                const categories = Array.isArray(payload.categories) ? payload.categories : [];
+                const difficulties = Array.isArray(payload.difficulties) ? payload.difficulties : [];
+                const questionDurationSec = Number(payload.questionDurationSec) || 60;
+                room.config = { amount, categories, difficulties, questionDurationSec };
+                room.roundNumber = 1;
                 
                 // Fetch from API
-                room.questions = await fetchQuestions(amount, difficulty, category);
+                room.questions = await fetchQuestions(amount, difficulties, categories);
                 
                 // Set ready state
                 room.status = 'LOBBY_READY'; 
@@ -145,6 +150,33 @@ class GameManager {
             }
         }
 
+        if (action === 'NEXT_ROUND') {
+            if (this.timeouts[roomCode]) {
+                clearTimeout(this.timeouts[roomCode]);
+                delete this.timeouts[roomCode];
+            }
+            room.status = 'LOADING';
+            room.currentQuestionIndex = 0;
+            room.roundNumber = (room.roundNumber || 1) + 1;
+            this.broadcastState(roomCode);
+
+            const { amount, difficulties, categories } = room.config;
+            try {
+                room.questions = await fetchQuestions(amount, difficulties, categories);
+                Object.values(room.teams).forEach(t => {
+                    t.currentAnswerId = null;
+                    t.lastAnswerTime = 0;
+                    t.lastAnsweredBy = null;
+                });
+                room.status = 'LOBBY_READY';
+                this.broadcastState(roomCode);
+            } catch (err) {
+                console.error("Next Round Failed:", err);
+                room.status = 'ROUND_END';
+                this.broadcastState(roomCode);
+            }
+        }
+
         if (action === 'NEXT_QUESTION') {
             // Only advance the index if we are currently looking at a Result (REVEAL)
             if (room.status === 'REVEAL') {
@@ -153,7 +185,7 @@ class GameManager {
 
             // Check if we ran out of questions
             if (room.currentQuestionIndex >= room.questions.length) {
-                room.status = 'FINISHED';
+                room.status = 'ROUND_END';
                 this.broadcastState(roomCode);
             } else {
                 this.startQuestion(roomCode);
@@ -162,6 +194,11 @@ class GameManager {
 
         if (action === 'REVEAL') {
             this.triggerReveal(roomCode);
+        }
+
+        if (action === 'END_GAME') {
+            room.status = 'FINISHED';
+            this.broadcastState(roomCode);
         }
     }
 
@@ -172,7 +209,8 @@ class GameManager {
         room.status = 'QUESTION';
         
         // TIME LIMIT: 60 Seconds
-        const DURATION = 60 * 1000; 
+        const durationSec = room.config?.questionDurationSec || 60;
+        const DURATION = durationSec * 1000; 
         room.currentQuestionEndsAt = Date.now() + DURATION;
 
         // Reset team answers for this round

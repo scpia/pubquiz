@@ -5,8 +5,29 @@ const { v4: uuidv4 } = require('uuid');
 // Helper to pause execution
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchQuestions(amount = 10, difficulty = 'medium', category = '') {
-    // 1. Build URL
+const pickOption = (input, fallback) => {
+    if (Array.isArray(input)) {
+        if (input.length === 0) return fallback;
+        return input[Math.floor(Math.random() * input.length)];
+    }
+    return input ?? fallback;
+};
+
+async function fetchQuestions(amount = 10, difficulties = 'medium', categories = '') {
+    const questions = [];
+
+    while (questions.length < amount) {
+        const diff = pickOption(difficulties, 'any');
+        const cat = pickOption(categories, '');
+        const batchSize = Math.min(50, amount - questions.length); // OpenTDB caps at 50 per call
+        const batch = await fetchQuestionsBatch(batchSize, diff, cat);
+        questions.push(...batch);
+    }
+
+    return questions.slice(0, amount);
+}
+
+async function fetchQuestionsBatch(amount, difficulty, category) {
     let url = `https://opentdb.com/api.php?amount=${amount}&type=multiple`;
     if (difficulty && difficulty !== 'any') url += `&difficulty=${difficulty}`;
     if (category && category !== 'any') url += `&category=${category}`;

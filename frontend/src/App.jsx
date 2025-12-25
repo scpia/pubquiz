@@ -14,9 +14,10 @@ export default function App() {
   const [openLobbies, setOpenLobbies] = useState([]);
 
   // Settings State
-  const [difficulty, setDifficulty] = useState('medium');
-  const [category, setCategory] = useState('');
+  const [selectedDifficulties, setSelectedDifficulties] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
   const [qCount, setQCount] = useState(10);
+  const [questionDuration, setQuestionDuration] = useState(60);
 
   const CATEGORIES = [
     { id: '', name: 'Any Category' },
@@ -28,6 +29,11 @@ export default function App() {
     { id: 21, name: 'Sports' },
     { id: 22, name: 'Geography' },
     { id: 23, name: 'History' },
+  ];
+  const DIFFICULTIES = [
+    { id: 'easy', name: 'Easy' },
+    { id: 'medium', name: 'Medium' },
+    { id: 'hard', name: 'Hard' },
   ];
 
   useEffect(() => {
@@ -52,19 +58,6 @@ export default function App() {
     return () => socket.off();
   }, []);
 
-  // --- TIMER LOGIC ---
-  useEffect(() => {
-    if (gameState?.status === 'QUESTION' && gameState?.currentQuestionEndsAt) {
-        const interval = setInterval(() => {
-            const secondsRemaining = Math.max(0, Math.ceil((gameState.currentQuestionEndsAt - Date.now()) / 1000));
-            setTimeLeft(secondsRemaining);
-        }, 1000);
-        return () => clearInterval(interval);
-    } else {
-        setTimeLeft(60);
-    }
-  }, [gameState?.status, gameState?.currentQuestionEndsAt]);
-
   // --- ACTIONS ---
   const createRoom = () => { if(!name.trim()) return alert("Nickname required"); socket.emit('create_room', { hostName: name }); };
   const joinRoom = (code = roomCode) => { 
@@ -78,10 +71,28 @@ export default function App() {
   const adminAction = (action, payload = {}) => { socket.emit('host_action', { roomCode: gameState.code, action, payload }); };
   const refreshLobbies = () => socket.emit('list_lobbies');
   const goToMenu = () => { if(!name.trim()) return alert("Nickname required"); setView('MENU'); refreshLobbies(); };
+  const startNextRound = () => adminAction('NEXT_ROUND');
+  const endGame = () => adminAction('END_GAME');
 
   const iAmHost = gameState?.players[socket.id]?.isHost;
   const myPlayer = gameState?.players[socket.id];
   const myTeam = myPlayer?.teamId ? gameState?.teams[myPlayer.teamId] : null;
+  const currentDuration = gameState?.config?.questionDurationSec || questionDuration || 60;
+  const currentRound = gameState?.roundNumber || 1;
+  const sortedTeams = gameState?.teams ? Object.values(gameState.teams).sort((a, b) => b.score - a.score) : [];
+
+  // --- TIMER LOGIC ---
+  useEffect(() => {
+    if (gameState?.status === 'QUESTION' && gameState?.currentQuestionEndsAt) {
+        const interval = setInterval(() => {
+            const secondsRemaining = Math.max(0, Math.ceil((gameState.currentQuestionEndsAt - Date.now()) / 1000));
+            setTimeLeft(secondsRemaining);
+        }, 1000);
+        return () => clearInterval(interval);
+    } else {
+        setTimeLeft(currentDuration);
+    }
+  }, [gameState?.status, gameState?.currentQuestionEndsAt, currentDuration]);
 
   useEffect(() => {
     if (view === 'MENU') {
@@ -198,12 +209,35 @@ export default function App() {
         {iAmHost && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 z-50">
             <div className="max-w-5xl mx-auto">
-            <div className="grid grid-cols-3 gap-2 mb-4">
-                <select className="bg-slate-800 text-white p-2 rounded" value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                <select className="bg-slate-800 text-white p-2 rounded" value={difficulty} onChange={e => setDifficulty(e.target.value)}><option value="any">Any Difficulty</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select>
-                <select className="bg-slate-800 text-white p-2 rounded" value={qCount} onChange={e => setQCount(Number(e.target.value))}><option value={5}>5 Questions</option><option value={10}>10 Questions</option></select>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                <div>
+                  <label className="text-xs text-slate-400 uppercase tracking-wide block mb-1">Question Count</label>
+                  <input type="number" min={1} max={500} className="w-full bg-slate-800 text-white p-2 rounded border border-slate-700" value={qCount} onChange={e => setQCount(Math.max(1, Number(e.target.value) || 1))}/>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 uppercase tracking-wide block mb-1">Timer (seconds)</label>
+                  <input type="number" min={5} max={600} className="w-full bg-slate-800 text-white p-2 rounded border border-slate-700" value={questionDuration} onChange={e => setQuestionDuration(Math.max(5, Number(e.target.value) || 5))}/>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 uppercase tracking-wide block mb-1">Categories (mix allowed)</label>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => setSelectedCategories([])} className={`px-3 py-2 rounded text-sm border ${selectedCategories.length === 0 ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>Any</button>
+                    {CATEGORIES.filter(c => c.id !== '').map(c => (
+                      <button key={c.id} onClick={() => setSelectedCategories(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id])} className={`px-3 py-2 rounded text-sm border ${selectedCategories.includes(c.id) ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>{c.name}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 uppercase tracking-wide block mb-1">Difficulties (mix allowed)</label>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => setSelectedDifficulties([])} className={`px-3 py-2 rounded text-sm border ${selectedDifficulties.length === 0 ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>Any</button>
+                    {DIFFICULTIES.map(d => (
+                      <button key={d.id} onClick={() => setSelectedDifficulties(prev => prev.includes(d.id) ? prev.filter(id => id !== d.id) : [...prev, d.id])} className={`px-3 py-2 rounded text-sm border ${selectedDifficulties.includes(d.id) ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>{d.name}</button>
+                    ))}
+                  </div>
+                </div>
             </div>
-            <button onClick={() => adminAction('START_GAME', { amount: qCount, difficulty, category })} className="w-full bg-brand-accent hover:bg-yellow-400 text-slate-900 font-bold py-3 rounded-xl">START GAME</button>
+            <button onClick={() => adminAction('START_GAME', { amount: qCount, categories: selectedCategories, difficulties: selectedDifficulties, questionDurationSec: questionDuration })} className="w-full bg-brand-accent hover:bg-yellow-400 text-slate-900 font-bold py-3 rounded-xl">START GAME</button>
             </div>
         </div>
         )}
@@ -217,26 +251,58 @@ export default function App() {
       <div className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-20 shadow-xl">
          <div className="flex justify-between items-center max-w-4xl mx-auto">
             <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${gameState.status === 'QUESTION' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
-                {gameState.status === 'LOBBY_READY' ? 'Ready' : (gameState.status === 'QUESTION' ? `Time: ${timeLeft}s` : 'Result')}
+                {gameState.status === 'LOBBY_READY' ? `Round ${currentRound} Ready` : (gameState.status === 'QUESTION' ? `Time: ${timeLeft}s` : (gameState.status === 'ROUND_END' ? 'Leaderboard' : 'Result'))}
             </div>
             <div className="font-mono font-bold text-indigo-400">{myTeam ? `${myTeam.score} PTS` : 'Spectating'}</div>
          </div>
          {gameState.status === 'QUESTION' && (
-            <div className="absolute bottom-0 left-0 h-1 bg-indigo-600 transition-all duration-1000 linear" style={{ width: `${(timeLeft/60)*100}%` }}></div>
+            <div className="absolute bottom-0 left-0 h-1 bg-indigo-600 transition-all duration-1000 linear" style={{ width: `${(timeLeft/Math.max(1,currentDuration))*100}%` }}></div>
          )}
       </div>
 
       {gameState.status === 'LOBBY_READY' && (
          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <h2 className="text-4xl font-bold text-white mb-4">Quiz is Ready!</h2>
-            {iAmHost && <button onClick={() => adminAction('NEXT_QUESTION')} className="bg-white text-black font-black py-4 px-12 rounded-xl text-xl hover:scale-105 transition-transform">START ROUND 1</button>}
+            {iAmHost && <button onClick={() => adminAction('NEXT_QUESTION')} className="bg-white text-black font-black py-4 px-12 rounded-xl text-xl hover:scale-105 transition-transform">{`START ROUND ${currentRound}`}</button>}
          </div>
+      )}
+
+      {(gameState.status === 'ROUND_END' || gameState.status === 'FINISHED') && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-3xl mx-auto w-full">
+          <h2 className="text-4xl font-bold text-white mb-6">Leaderboard</h2>
+          <p className="text-slate-400 mb-4">After round {currentRound}</p>
+          {sortedTeams.length === 0 ? (
+            <div className="text-slate-400">No teams yet.</div>
+          ) : (
+            <div className="w-full space-y-3">
+              {sortedTeams.map((team, idx) => (
+                <div key={team.id} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg font-black text-indigo-400">#{idx + 1}</span>
+                    <div className="text-left">
+                      <div className="text-white font-bold">{team.name}</div>
+                      <div className="text-slate-500 text-xs">{team.members.length} player(s)</div>
+                    </div>
+                  </div>
+                  <div className="text-xl font-black text-white">{team.score} pts</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {iAmHost && gameState.status === 'ROUND_END' && (
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button onClick={startNextRound} className="bg-white text-slate-900 font-black px-6 py-3 rounded-xl hover:bg-gray-100">Start Next Round</button>
+              <button onClick={endGame} className="bg-slate-800 text-slate-200 font-bold px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-700">End Game</button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* -------------------------------------- */}
       {/* THIS IS THE UPDATED QUESTION BLOCK     */}
       {/* -------------------------------------- */}
-      {(gameState.status === 'QUESTION' || gameState.status === 'REVEAL' || gameState.status === 'FINISHED') && gameState.currentQuestion && (
+      {(gameState.status === 'QUESTION' || gameState.status === 'REVEAL') && gameState.currentQuestion && (
         <div className="flex-1 flex flex-col justify-center items-center p-4 max-w-4xl mx-auto w-full">
            
            {/* === NEW: RESULT BANNER === */}
@@ -301,7 +367,12 @@ export default function App() {
           <div className="pointer-events-auto shadow-2xl rounded-2xl overflow-hidden">
              {gameState.status === 'QUESTION' ? (
                <button onClick={() => adminAction('REVEAL')} className="bg-slate-800 text-slate-300 font-bold py-3 px-8 text-sm hover:bg-slate-700 border border-slate-600">Force Reveal</button>
-             ) : (
+             ) : gameState.status === 'ROUND_END' ? (
+               <div className="flex flex-col sm:flex-row">
+                 <button onClick={startNextRound} className="bg-white text-slate-900 font-black py-3 px-8 text-sm hover:bg-gray-100">START NEXT ROUND</button>
+                 <button onClick={endGame} className="bg-slate-800 text-slate-300 font-bold py-3 px-6 text-sm hover:bg-slate-700 border border-slate-600">End Game</button>
+               </div>
+             ) : gameState.status === 'FINISHED' ? null : (
                <button onClick={() => adminAction('NEXT_QUESTION')} className="bg-white text-slate-900 font-black py-4 px-12 text-lg hover:bg-gray-100">NEXT QUESTION →</button>
              )}
           </div>
